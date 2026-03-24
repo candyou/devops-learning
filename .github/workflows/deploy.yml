@@ -1,0 +1,67 @@
+name: Build & Deploy
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'app/**'
+      - 'k8s/**'
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Checkout du code
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 2. Login sur GHCR
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_TOKEN }}
+
+      # 3. Build et push de l'image Docker
+      # On tag avec le SHA du commit → chaque build a un tag unique
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./app
+          push: true
+          tags: |
+            ghcr.io/candyou/devops-learning-app:latest
+            ghcr.io/candyou/devops-learning-app:${{ github.sha }}
+
+      # 4. Récupérer l'IP du master via AWS CLI
+      - name: Get K3s master IP
+        id: master-ip
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: eu-west-3
+        run: |
+          IP=$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=devops-learning-k3s-master" \
+                      "Name=instance-state-name,Values=running" \
+            --query "Reservations[0].Instances[0].PublicIpAddress" \
+            --output text)
+          echo "ip=$IP" >> $GITHUB_OUTPUT
+
+      # 5. Déployer sur K3s via SSH
+      - name: Deploy to K3s
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ steps.master-ip.outputs.ip }}
+          username: rocky
+          key: ${{ secrets.K3S_SSH_KEY }}
+          script: |
+            # Mettre à jour l'image avec le nouveau SHA
+            sudo /usr/local/bin/k3s kubectl set image deployment/devops-learning-app \
+              app=ghcr.io/candyou/devops-learning-app:${{ github.sha }}
+
+            # Attendre que le rollout soit terminé
+            sudo /usr/local/bin/k3s kubectl rollout status deployment/devops-learning-app
