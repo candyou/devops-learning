@@ -1,0 +1,20 @@
+# Terraform
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.backup
+terraform/.terraform.lock.hcl
+
+# SSH Keys
+*.pem
+*.key
+
+# Env files
+.env
+.env.*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node
+app/node_modules/
